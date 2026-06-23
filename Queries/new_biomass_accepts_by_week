@@ -1,0 +1,46 @@
+SELECT
+    ordr.order_number,
+    MAX(CASE WHEN deets.variable_code = 'pwname' THEN val.value END) AS peanut_wagon_name,
+    MAX(CASE WHEN deets.variable_code = 'wetordry' THEN val.value END) AS destination,
+    MAX(record.reported_on AT TIME ZONE 'Mountain Standard Time') AS completion_date,
+    ordr.actual_start_date AT TIME ZONE 'Mountain Standard Time' AS screening_date,
+    DATEPART(WEEK, CAST(ordr.actual_start_date AS DATE)) AS week_of_screening,
+    MAX(CASE WHEN deets.variable_code = 'smoisture' THEN val.value END) AS moisture_content,
+    MAX(CASE WHEN deets.variable_code = 'swwagon' THEN val.value END) AS wagon_weight,
+    MAX(CASE 
+        WHEN record.reported_quantity > 1800 
+        THEN record.reported_quantity - 500 
+        ELSE record.reported_quantity 
+    END) AS screened_amount_kgs,
+    MAX(CASE WHEN deets.variable_code = 'swwagon' THEN val.value END) - 
+    MAX(CASE 
+        WHEN record.reported_quantity > 1800 
+        THEN record.reported_quantity - 500 
+        ELSE record.reported_quantity 
+    END) - 1840 AS combined_overs_unders_weight_kgs
+FROM [external].data_collection_values val 
+LEFT JOIN [external].data_collection_details deets
+    ON val.data_collection_id = deets.id
+LEFT JOIN execution.[Wip_Operation] op
+    ON deets.operation_id = op.guid
+JOIN execution.[Wip_Order] ordr 
+    ON op.wip_order_guid = ordr.guid
+LEFT JOIN execution.[Wip_Operation_Quantity_Record] record 
+    ON record.wip_operation_guid = op.guid
+-- Reference tables
+LEFT JOIN master.[Product] product 
+    ON ordr.product_guid = product.guid
+LEFT JOIN master.[Site] site 
+    ON ordr.site_guid = site.guid
+WHERE 
+    site.code = 'CHARM' 
+    AND product.code = 'biomass_accepts'
+GROUP BY 
+    ordr.order_number, 
+    ordr.actual_start_date
+HAVING 
+    MAX(CASE 
+        WHEN record.reported_quantity > 1800 
+        THEN record.reported_quantity - 500 
+        ELSE record.reported_quantity 
+    END) > 100;

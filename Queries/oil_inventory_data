@@ -1,0 +1,46 @@
+WITH attributes AS (
+    SELECT
+        ordr.order_number,
+        MAX(CASE WHEN deets.variable_code = 'toteWeight' THEN val.value END) as gross_weight,
+        MAX(CASE WHEN deets.variable_code = 'sectag' THEN val.value END) as sectag
+    FROM [external].data_collection_values val 
+    LEFT JOIN [external].data_collection_details deets
+        ON val.data_collection_id = deets.id
+    LEFT JOIN execution.[Wip_Operation] op
+        ON deets.operation_id = op.guid
+    JOIN execution.[Wip_Order] ordr 
+        ON op.wip_order_guid = ordr.guid
+    WHERE deets.variable_code IN ('toteWeight', 'sectag')
+    GROUP BY ordr.order_number
+)
+SELECT 
+    CASE WHEN product.code = 'oily_fraction' THEN 'WODO' ELSE product.code END as product,
+    trace.lot_number, 
+    CASE WHEN attr.sectag is null then trace.lot_number ELSE attr.sectag END as security_tag,
+    FORMAT(trace.created_on, 'MM-dd-yyyy HH:mm:ss') as production_date,
+    itag.code as inventory_itag,
+    site.code as site_location,
+    loc.code as location,
+    wo.order_number produced_on_work_rder,
+    soh.order_number as shipping_order_number,
+    contitag.code as container_itag,
+    inv.quantity_on_hand as net_weight_kg,
+    CASE WHEN attr.gross_weight is null then inv.quantity_on_hand+57.6 ELSE attr.gross_weight END as gross_weight
+
+FROM master.[Product] product
+JOIN [traceability].[Trace] trace ON trace.product_guid = product.guid
+JOIN inventory.[Inventory] inv ON trace.guid = inv.trace_guid
+JOIN master.[Site] site ON inv.site_guid = site.guid
+LEFT JOIN [master].[Location] loc ON inv.location_guid = loc.guid
+LEFT JOIN [execution].[Wip_Trace] wt ON trace.guid = wt.trace_guid
+LEFT JOIN execution.[Wip_Order] wo ON wt.wip_order_guid = wo.guid
+LEFT JOIN attributes attr ON wo.order_number = attr.order_number
+LEFT JOIN [traceability].[iTag] itag ON inv.i_tag_guid = itag.guid
+LEFT JOIN inventory.shipped_inventory_records sir ON sir.inventory_itag_id = itag.guid
+LEFT JOIN inventory.[Shipping_Order_Line] sol ON sir.line_id = sol.guid
+LEFT JOIN inventory.[Shipping_Order_Header] soh ON sol.shipping_order_header_guid = soh.guid
+LEFT JOIN [inventory].[Container] cont ON inv.container_guid = cont.guid
+LEFT JOIN [traceability].[iTag] contitag ON cont.i_tag_guid = contitag.guid
+WHERE product.code IN ('oily_fraction', 'aqueous_fraction') 
+    AND site.code NOT LIKE '%TEST%'
+ORDER BY production_date

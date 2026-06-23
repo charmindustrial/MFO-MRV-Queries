@@ -1,0 +1,32 @@
+with tote_attributes as (
+    SELECT
+    ordr.order_number,
+    MAX(CASE WHEN deets.variable_code = 'toteWeight' THEN vals.value END) as gross_weight,
+    MAX(CASE WHEN deets.variable_code = 'sectag' THEN vals.value END) as sectag,
+    lot_number
+    from [external].data_collection_values vals
+    left join [external].data_collection_details deets
+        on vals.data_collection_id = deets.id
+    left join [execution].[Wip_Operation] op
+        on deets.operation_id =op.guid
+    left join [execution].[Wip_Order] ordr
+        on op.wip_order_guid = ordr.guid
+    LEFT JOIN master.[Site] site 
+        ON ordr.site_guid = site.guid
+    LEFT JOIN [execution].[Wip_Trace] wt
+        ON op.wip_trace_guid = wt.guid
+    LEFT JOIN [traceability].[Trace] 
+        ON wt.trace_guid = trace.guid
+    GROUP BY ordr.order_number, site.code, lot_number
+)
+select reported_quantity, reported_on, year(reported_on) production_year, ordr.order_number, prod.code, ta.gross_weight, ta.sectag, ta.lot_number
+from [execution].[Wip_Operation_Quantity_Record] qty
+left join [execution].[Wip_Operation] op on qty.wip_operation_guid = op.guid
+left join [execution].[Wip_Order] ordr on op.wip_order_guid = ordr.guid
+left join [planning].[Process] p on ordr.process_guid = p.guid
+left join [planning].[Process_Translation] pt on pt.process_guid = p.guid
+left join [master].[Product] prod on ordr.product_guid=prod.guid
+left join tote_attributes ta on ta.order_number =ordr.order_number
+where pt.medium in ('Oil Weighing') and prod.code in ('aqueous_fraction','oily_fraction')
+group by reported_quantity, year(reported_on), ordr.order_number, prod.code, ta.gross_weight, ta.sectag, ta.lot_number, reported_on
+order by reported_on

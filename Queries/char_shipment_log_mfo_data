@@ -1,0 +1,95 @@
+-- ============================================================
+-- CHARM Biochar Full Universe
+-- One row per iTag, keyed on security tag (lot number)
+-- Designed for XLOOKUP from external spreadsheet
+-- ============================================================
+
+WITH history_dates AS (
+    SELECT
+        ih.trace_guid,
+        MIN(ih.production_date) AS earliest_production_date
+    FROM inventory.[Inventory_History] ih
+    GROUP BY ih.trace_guid
+)
+
+-- IN INVENTORY (live on-hand)
+SELECT
+    inv.itag_code,
+    inv.trace_lot_number                                AS security_tag,
+    inv.container_itag_code                             AS container,
+    inv.quantity_on_hand                                AS mass_kg,
+    'In Inventory'                                      AS inventory_status,
+    CASE
+        WHEN inv.location_code = 'biochar_dry' THEN 'DRY'
+        ELSE inv.location_code
+    END                                                 AS location,
+    NULL                                                AS shipping_order_number,
+    NULL                                                AS shipped_on,
+    CAST(
+        hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        AS date
+    )                                                   AS production_date,
+    CONCAT(
+        RIGHT(CONVERT(varchar(4), DATEPART(year,
+            hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        )), 2),
+        RIGHT('0' + CONVERT(varchar(2), DATEPART(month,
+            hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        )), 2)
+    )                                                   AS production_period,
+    inv.pedigree_code                                   AS pedigree,
+    inv.inventory_status                                AS inventory_status_code
+
+FROM [external].[inventory_overview] inv
+LEFT JOIN history_dates hd
+    ON hd.trace_guid = inv.trace_id
+WHERE inv.product_code = 'bio_char'
+  AND inv.site_code    = 'CHARM'
+
+UNION ALL
+
+-- SHIPPED (confirmed out, no longer in inventory_overview)
+SELECT
+    hist.i_tag                                          AS itag_code,
+    hist.lot_number                                     AS security_tag,
+    hist.container_i_tag                                AS container,
+    hist.start_quantity                                 AS mass_kg,
+    'Shipped'                                           AS inventory_status,
+    CASE
+        WHEN hist.location_code = 'biochar_dry' THEN 'DRY'
+        ELSE hist.location_code
+    END                                                 AS location,
+    hist.shipping_order_header_number                   AS shipping_order_number,
+    CAST(
+        hist.created_on AT TIME ZONE 'Mountain Standard Time'
+        AS date
+    )                                                   AS shipped_on,
+    CAST(
+        hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        AS date
+    )                                                   AS production_date,
+    CONCAT(
+        RIGHT(CONVERT(varchar(4), DATEPART(year,
+            hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        )), 2),
+        RIGHT('0' + CONVERT(varchar(2), DATEPART(month,
+            hd.earliest_production_date AT TIME ZONE 'Mountain Standard Time'
+        )), 2)
+    )                                                   AS production_period,
+    NULL                                                AS pedigree,
+    NULL                                                AS inventory_status_code
+
+FROM inventory.[Inventory_History] hist
+LEFT JOIN history_dates hd
+    ON hd.trace_guid = hist.trace_guid
+WHERE hist.product_code                   = 'bio_char'
+  AND hist.site_code                      = 'CHARM'
+  AND hist.shipping_order_header_number   IS NOT NULL
+  AND hist.i_tag NOT IN (
+      SELECT itag_code
+      FROM [external].[inventory_overview]
+      WHERE product_code = 'bio_char'
+        AND site_code    = 'CHARM'
+  )
+
+ORDER BY production_date DESC, security_tag
